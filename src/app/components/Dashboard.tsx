@@ -30,6 +30,8 @@ import { AlertsModule } from './modules/AlertsModule';
 import { GPSModule } from './modules/GPSModule';
 import { InsuranceModule } from './modules/InsuranceModule';
 import { Avatar, AvatarFallback } from './ui/avatar';
+import { Badge } from './ui/badge';
+import { useAlerts } from '../contexts/AlertsContext';
 
 type Module =
   | 'home'
@@ -61,11 +63,16 @@ export function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { totalAlertsCount } = useAlerts();
+
+  const handleNavigate = (module: string) => {
+    setCurrentModule(module as Module);
+  };
 
   const renderModule = () => {
     switch (currentModule) {
       case 'home':
-        return <DashboardHome onNavigate={setCurrentModule} />;
+        return <DashboardHome onNavigate={handleNavigate} />;
       case 'cars':
         return <CarsModule />;
       case 'choferes':
@@ -83,9 +90,9 @@ export function Dashboard() {
       case 'transactions':
         return <TransactionsModule />;
       case 'alerts':
-        return <AlertsModule />;
+        return <AlertsModule onNavigate={handleNavigate} />;
       default:
-        return <DashboardHome onNavigate={setCurrentModule} />;
+        return <DashboardHome onNavigate={handleNavigate} />;
     }
   };
 
@@ -120,8 +127,16 @@ export function Dashboard() {
                 className={`w-full justify-start ${isActive ? '' : 'hover:bg-accent'}`}
                 onClick={() => setCurrentModule(item.id)}
               >
-                <Icon className="w-4 h-4 mr-3" />
-                {item.label}
+                <Icon className="w-4 h-4 mr-3 shrink-0" />
+                <span className="truncate">{item.label}</span>
+                {item.id === 'alerts' && totalAlertsCount > 0 && (
+                  <Badge
+                    variant="destructive"
+                    className="ml-auto text-xs font-bold px-2 py-0.5 min-w-5 h-5 flex items-center justify-center rounded-full shadow-2xs shrink-0"
+                  >
+                    {totalAlertsCount}
+                  </Badge>
+                )}
               </Button>
             );
           })}
@@ -166,13 +181,29 @@ export function Dashboard() {
               {menuItems.find(item => item.id === currentModule)?.label || 'Dashboard'}
             </h2>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          >
-            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative text-muted-foreground hover:text-foreground"
+              onClick={() => handleNavigate('alerts')}
+              title={totalAlertsCount > 0 ? `${totalAlertsCount} alertas pendientes` : 'Alertas'}
+            >
+              <Bell className="w-5 h-5" />
+              {totalAlertsCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white shadow-xs animate-pulse">
+                  {totalAlertsCount}
+                </span>
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            >
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </Button>
+          </div>
         </header>
 
         {/* Content Area */}

@@ -21,6 +21,8 @@ export interface Alquiler {
   garantia: string;
   importe: string;
   comentarios?: string;
+  estado?: 'activo' | 'finalizado';
+  metodoPago?: string;
 }
 
 export interface Chofer {

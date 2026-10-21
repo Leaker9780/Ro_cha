@@ -1,187 +1,40 @@
-import { useState, useEffect } from 'react';
-// Importaciones de Firebase
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebaseConfig';
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Badge } from '../ui/badge';
-import { AlertCircle, Shield, Wrench, CheckCircle, ShieldCheck } from 'lucide-react';
-import { format, differenceInDays } from 'date-fns';
+import { Button } from '../ui/button';
+import { cn, safeFormatDate } from '../ui/utils';
+import {
+  AlertCircle,
+  Shield,
+  ShieldAlert,
+  Wrench,
+  CheckCircle,
+  ShieldCheck,
+  Calendar,
+  Clock,
+  ChevronRight
+} from 'lucide-react';
+import { useAlerts } from '../../contexts/AlertsContext';
 
-// 1. Interfaces basadas en tu Firestore
-interface Auto {
-  id: string;
-  marca: string;
-  modelo: string;
-  placa: string;
+interface AlertsModuleProps {
+  onNavigate?: (module: string) => void;
 }
 
-interface SOATData {
-  id: string;
-  placa: string;
-  aseguradora: string;
-  cobertura: string;
-}
-
-interface SeguroData {
-  id: string;
-  placa: string;
-  concepto: string;
-  comentario: string;
-}
-
-interface MantenimientoData {
-  id: string;
-  placa: string;
-  tipo?: string;
-  nextDate?: string; 
-  detalles?: any[];
-}
-
-export function AlertsModule() {
-  const [autos, setAutos] = useState<Auto[]>([]);
-  const [soats, setSoats] = useState<SOATData[]>([]);
-  const [seguros, setSeguros] = useState<SeguroData[]>([]);
-  const [mantenimientos, setMantenimientos] = useState<MantenimientoData[]>([]);
-
-  // 2. Traemos TODA la data en tiempo real
-  useEffect(() => {
-    const unsubAutos = onSnapshot(collection(db, 'autos'), (snap) => 
-      setAutos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Auto)))
-    );
-    const unsubSoats = onSnapshot(collection(db, 'soat'), (snap) => 
-      setSoats(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as SOATData)))
-    );
-    const unsubSeguros = onSnapshot(collection(db, 'seguros'), (snap) => 
-      setSeguros(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as SeguroData)))
-    );
-    const unsubMantenimiento = onSnapshot(collection(db, 'mantenimiento'), (snap) => 
-      setMantenimientos(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MantenimientoData)))
-    );
-
-    return () => {
-      unsubAutos();
-      unsubSoats();
-      unsubSeguros();
-      unsubMantenimiento();
-    };
-  }, []);
-
-  // Configuramos "hoy" a la medianoche para cálculos exactos
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  // ==========================================
-  // 3. LÓGICA DE ALERTAS SOAT (Con Historial Inteligente)
-  // ==========================================
-  const latestSoatsByCar = new Map<string, number>();
-  
-  // Encontramos el SOAT más reciente por cada auto
-  soats.forEach(soat => {
-    if (!soat.cobertura) return;
-    const fechas = soat.cobertura.split(' - ');
-    if (fechas.length < 2) return;
-    const [d, m, y] = fechas[1].split('/');
-    const endTimestamp = new Date(`${y}-${m}-${d}T00:00:00`).getTime();
-    
-    if (!latestSoatsByCar.has(soat.placa) || endTimestamp > (latestSoatsByCar.get(soat.placa) || 0)) {
-      latestSoatsByCar.set(soat.placa, endTimestamp);
-    }
-  });
-
-  const upcomingSOAT = soats.map(soat => {
-    const car = autos.find(c => c.id === soat.placa);
-    if (!car || !soat.cobertura) return null;
-    
-    const fechas = soat.cobertura.split(' - ');
-    if (fechas.length < 2) return null;
-
-    const [d, m, y] = fechas[1].split('/');
-    const expiry = new Date(`${y}-${m}-${d}T00:00:00`);
-    const endTimestamp = expiry.getTime();
-
-    // Si el SOAT evaluado no es el más reciente de este carro, lo IGNORAMOS
-    if (endTimestamp < (latestSoatsByCar.get(soat.placa) || 0)) {
-      return null;
-    }
-
-    const daysUntilExpiry = differenceInDays(expiry, today);
-
-    // Solo mostramos alertas si faltan 30 días o menos
-    if (daysUntilExpiry <= 30) {
-      return { soat: { ...soat, expiryDate: expiry }, car, daysUntilExpiry };
-    }
-    return null;
-  }).filter(Boolean).sort((a: any, b: any) => a.daysUntilExpiry - b.daysUntilExpiry);
-
-
-  // ==========================================
-  // 4. LÓGICA DE ALERTAS SEGUROS (Con Historial Inteligente)
-  // ==========================================
-  const latestSegurosByCar = new Map<string, number>();
-
-  // Encontramos el Seguro más reciente por cada auto
-  seguros.forEach(seguro => {
-    if (!seguro.comentario) return;
-    const dateMatch = seguro.comentario.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    if (!dateMatch) return;
-    const endTimestamp = new Date(`${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}T00:00:00`).getTime();
-
-    if (!latestSegurosByCar.has(seguro.placa) || endTimestamp > (latestSegurosByCar.get(seguro.placa) || 0)) {
-      latestSegurosByCar.set(seguro.placa, endTimestamp);
-    }
-  });
-
-  const upcomingInsurance = seguros.map(seguro => {
-    const car = autos.find(c => c.id === seguro.placa);
-    if (!car || !seguro.comentario) return null;
-
-    const dateMatch = seguro.comentario.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-    if (!dateMatch) return null;
-
-    const expiry = new Date(`${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}T00:00:00`);
-    const endTimestamp = expiry.getTime();
-
-    // Si el Seguro evaluado no es el más reciente de este carro, lo IGNORAMOS
-    if (endTimestamp < (latestSegurosByCar.get(seguro.placa) || 0)) {
-      return null;
-    }
-
-    const daysUntilExpiry = differenceInDays(expiry, today);
-
-    if (daysUntilExpiry <= 30) {
-      return { insurance: { ...seguro, expiryDate: expiry }, car, daysUntilExpiry };
-    }
-    return null;
-  }).filter(Boolean).sort((a: any, b: any) => a.daysUntilExpiry - b.daysUntilExpiry);
-
-
-  // ==========================================
-  // 5. LÓGICA DE ALERTAS MANTENIMIENTO
-  // ==========================================
-  const upcomingMaintenance = mantenimientos.map(m => {
-    if (!m.nextDate) return null; 
-    
-    const car = autos.find(c => c.id === m.placa);
-    if (!car) return null;
-
-    const expiry = new Date(`${m.nextDate}T00:00:00`);
-    const daysUntilDue = differenceInDays(expiry, today);
-
-    if (daysUntilDue <= 30) {
-      return { maintenance: m, car, daysUntilDue };
-    }
-    return null;
-  }).filter(Boolean).sort((a: any, b: any) => a.daysUntilDue - b.daysUntilDue);
-
-  const hasAlerts = upcomingSOAT.length > 0 || upcomingMaintenance.length > 0 || upcomingInsurance.length > 0;
+export function AlertsModule({ onNavigate }: AlertsModuleProps) {
+  const { upcomingSOAT, upcomingInsurance, upcomingMaintenance, totalAlertsCount } = useAlerts();
+  const hasAlerts = totalAlertsCount > 0;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">Centro de Alertas</h2>
-        <p className="text-muted-foreground">Notificaciones y recordatorios importantes</p>
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold">Centro de Alertas</h2>
+          {totalAlertsCount > 0 && (
+            <Badge variant="destructive" className="font-bold text-xs px-2.5 py-0.5">
+              {totalAlertsCount} {totalAlertsCount === 1 ? 'alerta activa' : 'alertas activas'}
+            </Badge>
+          )}
+        </div>
+        <p className="text-muted-foreground mt-1">Notificaciones y recordatorios importantes</p>
       </div>
 
       {!hasAlerts ? (
@@ -196,162 +49,347 @@ export function AlertsModule() {
         <div className="space-y-6">
           {/* Alertas SOAT */}
           {upcomingSOAT.length > 0 && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Shield className="w-6 h-6 text-orange-500" />
-                  <div>
-                    <CardTitle>SOAT Próximos a Vencer</CardTitle>
-                    <CardDescription>
-                      {upcomingSOAT.length} vehículo(s) requieren renovación de SOAT
-                    </CardDescription>
+            <Card className="border-border/80 shadow-xs">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
+                      <ShieldAlert className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base font-semibold">SOAT Próximos a Vencer</CardTitle>
+                      <CardDescription className="text-xs mt-0.5">
+                        {upcomingSOAT.length} {upcomingSOAT.length === 1 ? 'vehículo requiere' : 'vehículos requieren'} renovación de SOAT
+                      </CardDescription>
+                    </div>
                   </div>
+                  <Badge
+                    variant="outline"
+                    className="border-orange-200 bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900/60 text-xs font-semibold px-2.5 py-0.5 shrink-0"
+                  >
+                    {upcomingSOAT.length} {upcomingSOAT.length === 1 ? 'alerta' : 'alertas'}
+                  </Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {upcomingSOAT.map(({ soat, car, daysUntilExpiry }: any) => (
-                  <Alert
-                    key={soat.id}
-                    variant={daysUntilExpiry <= 7 ? 'destructive' : 'default'}
-                    className="border-l-4 border-l-orange-500"
-                  >
-                    <AlertCircle className="h-5 w-5" />
-                    <div className="flex-1">
-                      <AlertTitle className="flex items-center gap-2">
-                        {car.marca} {car.modelo} - {car.placa}
-                        {daysUntilExpiry <= 7 && (
-                          <Badge variant="destructive">Urgente</Badge>
+              <CardContent className="space-y-2.5 pt-0">
+                {upcomingSOAT.map(({ soat, car, daysUntilExpiry }: any) => {
+                  const isExpired = daysUntilExpiry < 0;
+                  const isUrgent = daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
+
+                  return (
+                    <div
+                      key={soat.id}
+                      className={cn(
+                        "flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border transition-all duration-150",
+                        isExpired
+                          ? "bg-red-500/5 border-red-500/20 hover:border-red-500/40 hover:bg-red-500/10"
+                          : isUrgent
+                          ? "bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/10"
+                          : "bg-muted/30 border-border/70 hover:border-border hover:bg-muted/50"
+                      )}
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div
+                          className={cn(
+                            "p-2 rounded-lg shrink-0 mt-0.5",
+                            isExpired
+                              ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                              : isUrgent
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                              : "bg-orange-500/15 text-orange-600 dark:text-orange-400"
+                          )}
+                        >
+                          <Shield className="w-5 h-5" />
+                        </div>
+
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-background border border-border tracking-wider text-foreground shadow-2xs">
+                              {car.placa}
+                            </span>
+                            <span className="font-semibold text-sm text-foreground">
+                              {car.marca} {car.modelo}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                            <span className="flex items-center gap-1 font-medium">
+                              <Calendar className="w-3.5 h-3.5 text-muted-foreground/80" />
+                              Vence: {safeFormatDate(soat.expiryDate)}
+                            </span>
+                            {soat.aseguradora && (
+                              <>
+                                <span className="text-muted-foreground/40">•</span>
+                                <span>Aseguradora: <strong className="text-foreground/80">{soat.aseguradora}</strong></span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 sm:shrink-0 justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-border/40">
+                        {isExpired ? (
+                          <Badge variant="destructive" className="font-semibold text-xs px-2.5 py-0.5 gap-1 shrink-0">
+                            <AlertCircle className="w-3 h-3" />
+                            {Math.abs(daysUntilExpiry)} {Math.abs(daysUntilExpiry) === 1 ? 'día vencido' : 'días vencidos'}
+                          </Badge>
+                        ) : isUrgent ? (
+                          <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs px-2.5 py-0.5 gap-1 shrink-0 border-0">
+                            <Clock className="w-3 h-3" />
+                            {daysUntilExpiry === 0 ? 'Vence hoy' : `Vence en ${daysUntilExpiry} d`}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="font-medium text-xs px-2.5 py-0.5 gap-1 shrink-0 border border-border/60">
+                            <Calendar className="w-3 h-3" />
+                            {daysUntilExpiry} días
+                          </Badge>
                         )}
-                      </AlertTitle>
-                      <AlertDescription className="mt-2 space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span>Vence el:</span>
-                          <span className="font-medium">
-                            {format(new Date(soat.expiryDate), 'dd/MM/yyyy')}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Días restantes:</span>
-                          <span className={`font-bold ${daysUntilExpiry < 0 ? 'text-red-600' : 'text-orange-600'}`}>
-                            {daysUntilExpiry < 0 ? `${Math.abs(daysUntilExpiry)} día(s) vencido` : `${daysUntilExpiry} día(s)`}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Aseguradora:</span>
-                          <span>{soat.aseguradora}</span>
-                        </div>
-                      </AlertDescription>
+
+                        {onNavigate && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onNavigate('soat')}
+                            className="h-8 px-3 text-xs gap-1 font-medium hover:bg-primary hover:text-primary-foreground transition-colors shrink-0"
+                          >
+                            <span>Gestionar SOAT</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </Alert>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           )}
 
           {/* Alertas Seguros */}
           {upcomingInsurance.length > 0 && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-6 h-6 text-purple-500" />
-                  <div>
-                    <CardTitle>Seguros Próximos a Vencer</CardTitle>
-                    <CardDescription>
-                      {upcomingInsurance.length} seguro(s) requieren renovación
-                    </CardDescription>
+            <Card className="border-border/80 shadow-xs">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base font-semibold">Seguros Próximos a Vencer</CardTitle>
+                      <CardDescription className="text-xs mt-0.5">
+                        {upcomingInsurance.length} {upcomingInsurance.length === 1 ? 'seguro requiere' : 'seguros requieren'} renovación
+                      </CardDescription>
+                    </div>
                   </div>
+                  <Badge
+                    variant="outline"
+                    className="border-purple-200 bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-900/60 text-xs font-semibold px-2.5 py-0.5 shrink-0"
+                  >
+                    {upcomingInsurance.length} {upcomingInsurance.length === 1 ? 'alerta' : 'alertas'}
+                  </Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {upcomingInsurance.map(({ insurance, car, daysUntilExpiry }: any) => (
-                  <Alert
-                    key={insurance.id}
-                    variant={daysUntilExpiry <= 7 ? 'destructive' : 'default'}
-                    className="border-l-4 border-l-purple-500"
-                  >
-                    <AlertCircle className="h-5 w-5 text-purple-500" />
-                    <div className="flex-1">
-                      <AlertTitle className="flex items-center gap-2">
-                        {car.marca} {car.modelo} - {car.placa}
-                        {daysUntilExpiry <= 7 && (
-                          <Badge variant="destructive">Urgente</Badge>
+              <CardContent className="space-y-2.5 pt-0">
+                {upcomingInsurance.map(({ insurance, car, daysUntilExpiry }: any) => {
+                  const isExpired = daysUntilExpiry < 0;
+                  const isUrgent = daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
+
+                  return (
+                    <div
+                      key={insurance.id}
+                      className={cn(
+                        "flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border transition-all duration-150",
+                        isExpired
+                          ? "bg-red-500/5 border-red-500/20 hover:border-red-500/40 hover:bg-red-500/10"
+                          : isUrgent
+                          ? "bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/10"
+                          : "bg-muted/30 border-border/70 hover:border-border hover:bg-muted/50"
+                      )}
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div
+                          className={cn(
+                            "p-2 rounded-lg shrink-0 mt-0.5",
+                            isExpired
+                              ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                              : isUrgent
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                              : "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                          )}
+                        >
+                          <ShieldCheck className="w-5 h-5" />
+                        </div>
+
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-background border border-border tracking-wider text-foreground shadow-2xs">
+                              {car.placa}
+                            </span>
+                            <span className="font-semibold text-sm text-foreground">
+                              {car.marca} {car.modelo}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                            <span>Concepto: <strong className="text-foreground/80">{insurance.concepto}</strong></span>
+                            <span className="text-muted-foreground/40">•</span>
+                            <span className="flex items-center gap-1 font-medium">
+                              <Calendar className="w-3.5 h-3.5 text-muted-foreground/80" />
+                              Vence: {safeFormatDate(insurance.expiryDate)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 sm:shrink-0 justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-border/40">
+                        {isExpired ? (
+                          <Badge variant="destructive" className="font-semibold text-xs px-2.5 py-0.5 gap-1 shrink-0">
+                            <AlertCircle className="w-3 h-3" />
+                            {Math.abs(daysUntilExpiry)} {Math.abs(daysUntilExpiry) === 1 ? 'día vencido' : 'días vencidos'}
+                          </Badge>
+                        ) : isUrgent ? (
+                          <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs px-2.5 py-0.5 gap-1 shrink-0 border-0">
+                            <Clock className="w-3 h-3" />
+                            {daysUntilExpiry === 0 ? 'Vence hoy' : `Vence en ${daysUntilExpiry} d`}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="font-medium text-xs px-2.5 py-0.5 gap-1 shrink-0 border border-border/60">
+                            <Calendar className="w-3 h-3" />
+                            {daysUntilExpiry} días
+                          </Badge>
                         )}
-                      </AlertTitle>
-                      <AlertDescription className="mt-2 space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span>Concepto:</span>
-                          <span className="font-medium">{insurance.concepto}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Vence el:</span>
-                          <span className="font-medium">
-                            {format(new Date(insurance.expiryDate), 'dd/MM/yyyy')}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Días restantes:</span>
-                          <span className={`font-bold ${daysUntilExpiry < 0 ? 'text-red-600' : 'text-purple-600'}`}>
-                            {daysUntilExpiry < 0 ? `${Math.abs(daysUntilExpiry)} día(s) vencido` : `${daysUntilExpiry} día(s)`}
-                          </span>
-                        </div>
-                      </AlertDescription>
+
+                        {onNavigate && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onNavigate('insurance')}
+                            className="h-8 px-3 text-xs gap-1 font-medium hover:bg-primary hover:text-primary-foreground transition-colors shrink-0"
+                          >
+                            <span>Gestionar Seguro</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </Alert>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           )}
 
           {/* Alertas Mantenimiento */}
           {upcomingMaintenance.length > 0 && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Wrench className="w-6 h-6 text-blue-500" />
-                  <div>
-                    <CardTitle>Mantenimientos Programados</CardTitle>
-                    <CardDescription>
-                      {upcomingMaintenance.length} mantenimiento(s) próximos
-                    </CardDescription>
+            <Card className="border-border/80 shadow-xs">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                      <Wrench className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base font-semibold">Mantenimientos Programados</CardTitle>
+                      <CardDescription className="text-xs mt-0.5">
+                        {upcomingMaintenance.length} {upcomingMaintenance.length === 1 ? 'mantenimiento próximo' : 'mantenimientos próximos'}
+                      </CardDescription>
+                    </div>
                   </div>
+                  <Badge
+                    variant="outline"
+                    className="border-blue-200 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/60 text-xs font-semibold px-2.5 py-0.5 shrink-0"
+                  >
+                    {upcomingMaintenance.length} {upcomingMaintenance.length === 1 ? 'pendiente' : 'pendientes'}
+                  </Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {upcomingMaintenance.map(({ maintenance, car, daysUntilDue }: any) => (
-                  <Alert key={maintenance.id} className="border-l-4 border-l-blue-500">
-                    <AlertCircle className="h-5 w-5 text-blue-500" />
-                    <div className="flex-1">
-                      <AlertTitle className="flex items-center gap-2">
-                        {car.marca} {car.modelo} - {car.placa}
-                        {daysUntilDue <= 7 && (
-                          <Badge className="bg-blue-500">Próximamente</Badge>
+              <CardContent className="space-y-2.5 pt-0">
+                {upcomingMaintenance.map(({ maintenance, car, daysUntilDue }: any) => {
+                  const isOverdue = daysUntilDue < 0;
+                  const isUrgent = daysUntilDue >= 0 && daysUntilDue <= 7;
+
+                  return (
+                    <div
+                      key={maintenance.id}
+                      className={cn(
+                        "flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border transition-all duration-150",
+                        isOverdue
+                          ? "bg-red-500/5 border-red-500/20 hover:border-red-500/40 hover:bg-red-500/10"
+                          : isUrgent
+                          ? "bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40 hover:bg-amber-500/10"
+                          : "bg-muted/30 border-border/70 hover:border-border hover:bg-muted/50"
+                      )}
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div
+                          className={cn(
+                            "p-2 rounded-lg shrink-0 mt-0.5",
+                            isOverdue
+                              ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                              : isUrgent
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                              : "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                          )}
+                        >
+                          <Wrench className="w-5 h-5" />
+                        </div>
+
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-background border border-border tracking-wider text-foreground shadow-2xs">
+                              {car.placa}
+                            </span>
+                            <span className="font-semibold text-sm text-foreground">
+                              {car.marca} {car.modelo}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                            <span>
+                              {maintenance.detalles && maintenance.detalles.length > 0
+                                ? maintenance.detalles[0].detalle
+                                : 'Mantenimiento Programado'}
+                            </span>
+                            <span className="text-muted-foreground/40">•</span>
+                            <span className="flex items-center gap-1 font-medium">
+                              <Calendar className="w-3.5 h-3.5 text-muted-foreground/80" />
+                              Programado: {safeFormatDate(maintenance.expiryDate || maintenance.nextDate)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 sm:shrink-0 justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-border/40">
+                        {isOverdue ? (
+                          <Badge variant="destructive" className="font-semibold text-xs px-2.5 py-0.5 gap-1 shrink-0">
+                            <AlertCircle className="w-3 h-3" />
+                            {Math.abs(daysUntilDue)} {Math.abs(daysUntilDue) === 1 ? 'día vencido' : 'días vencidos'}
+                          </Badge>
+                        ) : isUrgent ? (
+                          <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs px-2.5 py-0.5 gap-1 shrink-0 border-0">
+                            <Clock className="w-3 h-3" />
+                            {daysUntilDue === 0 ? 'Hoy' : `En ${daysUntilDue} d`}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="font-medium text-xs px-2.5 py-0.5 gap-1 shrink-0 border border-border/60">
+                            <Calendar className="w-3 h-3" />
+                            {daysUntilDue} días
+                          </Badge>
                         )}
-                      </AlertTitle>
-                      <AlertDescription className="mt-2 space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span>Detalle:</span>
-                          <span className="font-medium">
-                            {maintenance.detalles && maintenance.detalles.length > 0 
-                              ? maintenance.detalles[0].detalle 
-                              : 'Mantenimiento Programado'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Fecha programada:</span>
-                          <span className="font-medium">
-                            {format(new Date(maintenance.nextDate), 'dd/MM/yyyy')}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Días restantes:</span>
-                          <span className="font-bold text-blue-600">
-                            {daysUntilDue} día(s)
-                          </span>
-                        </div>
-                      </AlertDescription>
+
+                        {onNavigate && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onNavigate('maintenance')}
+                            className="h-8 px-3 text-xs gap-1 font-medium hover:bg-primary hover:text-primary-foreground transition-colors shrink-0"
+                          >
+                            <span>Gestionar Taller</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </Alert>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           )}
