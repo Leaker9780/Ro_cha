@@ -4,27 +4,36 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Label } from './ui/label';
-import { Car, AlertCircle } from 'lucide-react';
+import { Car, AlertCircle, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 
 export function Login() {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (!username || !password) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
       setError('Por favor, completa todos los campos');
       return;
     }
 
-    const success = login(username, password);
-    if (!success) {
-      setError('Usuario o contraseña incorrectos');
+    try {
+      setIsLoading(true);
+      const success = await login(cleanEmail, password);
+      if (!success) {
+        setError('Correo o contraseña incorrectos');
+      }
+    } catch {
+      setError('Ocurrió un error al iniciar sesión. Intenta nuevamente.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -41,14 +50,15 @@ export function Login() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="username">Usuario</Label>
+              <Label htmlFor="email">Correo Electrónico</Label>
               <Input
-                id="username"
-                type="text"
-                placeholder="Ingresa tu usuario"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
+                id="email"
+                type="email"
+                placeholder="admin@rocha.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                disabled={isLoading}
               />
             </div>
             <div className="space-y-2">
@@ -60,6 +70,7 @@ export function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
+                disabled={isLoading}
               />
             </div>
             {error && (
@@ -68,8 +79,15 @@ export function Login() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            <Button type="submit" className="w-full">
-              Iniciar Sesión
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Iniciando sesión...
+                </>
+              ) : (
+                'Iniciar Sesión'
+              )}
             </Button>
           </form>
         </CardContent>
